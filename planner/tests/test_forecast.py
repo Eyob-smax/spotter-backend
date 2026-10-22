@@ -73,3 +73,24 @@ def test_end():
 def test_off_hour_lookup_rejected():
     with pytest.raises(ValueError):
         series()._value([1.0], T0 + 1)
+
+
+def test_informational_fields_use_their_own_alignment():
+    s = series(
+        temperature_f=[50.0 + i for i in range(6)],
+        precip_probability=[10 * i for i in range(6)],
+        visibility_ft=[5280.0 * (i + 1) for i in range(6)],
+        weather_code=[0, 3, 61, 71, 95, 45],
+    )
+    sample = s.sample(T0 + HOUR + 20 * 60)  # 01:20 -> instantaneous @01:00, hour-ending @02:00
+    assert sample.temperature_f == 51.0
+    assert sample.visibility_mi == 2.0
+    assert sample.weather_code == 3
+    assert sample.precip_probability == 20
+    assert sample.to_dict()["conditions"] == "Overcast"
+
+
+def test_missing_informational_fields_are_none():
+    sample = series().sample(T0 + HOUR)
+    d = sample.to_dict()
+    assert d["temperature_f"] is None and d["visibility_mi"] is None and d["conditions"] is None

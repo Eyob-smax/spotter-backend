@@ -64,6 +64,7 @@ planner/
    - Each ETA comes from TomTom's own cumulative travel time along the route, not a constant-speed guess.
 3. **Weather at the ETA.**
    - Checkpoints are snapped to 0.1° cells and fetched in one batched, cached Open-Meteo request.
+   - Each checkpoint also reports temperature, visibility, chance of precipitation and a conditions description (from the WMO weather code). These are shown to the driver but don't change the risk, which follows the brief's wind/rain/snow rules.
    - Wind uses the forecast hour nearest the ETA. Precipitation uses the hour whose window contains the ETA, because Open-Meteo totals cover the hour before each timestamp.
 4. **Risk and recommendation.** See the assumptions below.
 

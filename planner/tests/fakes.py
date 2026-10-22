@@ -146,6 +146,10 @@ class FakeOpenMeteo:
                         "rain": [r[2] for r in rows],
                         "showers": [r[3] for r in rows],
                         "snowfall": [r[4] for r in rows],
+                        "temperature_2m": [55.0] * len(rows),
+                        "precipitation_probability": [10] * len(rows),
+                        "visibility": [52_800.0] * len(rows),  # 10 miles in feet
+                        "weather_code": [2] * len(rows),
                     },
                 }
             )

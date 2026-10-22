@@ -1,7 +1,7 @@
 """Open-Meteo hourly forecasts for many locations, batched and cached per grid cell.
 
 * Locations are snapped to a grid cell (multiples of 0.1°); each cell is fetched once.
-* Cache key: ``wx:v1:{lat}:{lon}:d{days}``; a cached series is reused while it
+* Cache key: ``wx:v2:{lat}:{lon}:d{days}``; a cached series is reused while it
   still covers the requested end time.
 * Misses are fetched 150 locations per request (≈2.5 KB URL), up to 4 requests in parallel.
 * A failed batch does not fail the whole request: those cells come back as ``None``.
@@ -26,7 +26,19 @@ from planner.domain.geo import LatLon
 
 logger = logging.getLogger(__name__)
 
-HOURLY_VARIABLES = ("wind_speed_10m", "wind_gusts_10m", "rain", "showers", "snowfall")
+# Risk uses wind, gusts, rain, showers and snowfall; the rest is shown to the user.
+# 9 variables stay under Open-Meteo's 10-variable weighting step (1 call per location).
+HOURLY_VARIABLES = (
+    "wind_speed_10m",
+    "wind_gusts_10m",
+    "rain",
+    "showers",
+    "snowfall",
+    "temperature_2m",
+    "precipitation_probability",
+    "visibility",
+    "weather_code",
+)
 DAY_BUCKETS = (3, 7, 10, 16)
 BATCH_SIZE = 150
 PARALLEL_BATCHES = 4
@@ -53,7 +65,7 @@ def days_needed(until_ts: float, now_ts: float) -> int:
 
 
 def _cache_key(cell: Cell, days: int) -> str:
-    return f"wx:v1:{cell[0]:.1f}:{cell[1]:.1f}:d{days}"
+    return f"wx:v2:{cell[0]:.1f}:{cell[1]:.1f}:d{days}"
 
 
 def parse_series(item: dict) -> HourlySeries:
@@ -68,6 +80,10 @@ def parse_series(item: dict) -> HourlySeries:
         rain_in=hourly["rain"],
         showers_in=hourly.get("showers") or [None] * len(times),
         snow_in=hourly["snowfall"],
+        temperature_f=hourly.get("temperature_2m") or [],
+        precip_probability=hourly.get("precipitation_probability") or [],
+        visibility_ft=hourly.get("visibility") or [],
+        weather_code=hourly.get("weather_code") or [],
     )
 
 
@@ -152,6 +168,7 @@ class WeatherService:
             "hourly": ",".join(HOURLY_VARIABLES),
             "wind_speed_unit": "mph",
             "precipitation_unit": "inch",
+            "temperature_unit": "fahrenheit",
             "timeformat": "unixtime",
             "timezone": "GMT",
             "forecast_days": days,

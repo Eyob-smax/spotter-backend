@@ -6,14 +6,21 @@ Open-Meteo semantics (verified against its docs):
   (the value stamped T covers T-1h..T) → use the hour whose window contains the ETA,
   i.e. the first timestamp at or after it.
 Rain rate is ``rain + showers`` (``rain`` alone excludes convective showers).
+
+Temperature, visibility and the weather code are instantaneous (nearest hour);
+precipitation probability covers the preceding hour. These extra fields are
+informational only: risk is scored from wind, rain and snow, as the brief defines.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from .wmo import describe
 
 HOUR = 3600
+FEET_PER_MILE = 5280
 
 
 def hour_ending_at_or_after(ts: float) -> int:
@@ -31,14 +38,26 @@ class WeatherSample:
     rain_in_hr: float
     snow_in_hr: float
     forecast_time: int  # unix seconds of the precipitation hour used
+    temperature_f: float | None = None
+    precip_probability: float | None = None  # percent
+    visibility_mi: float | None = None
+    weather_code: int | None = None
 
     def to_dict(self) -> dict:
+        def r(v: float | None, n: int) -> float | None:
+            return None if v is None else round(v, n)
+
         return {
             "wind_mph": round(self.wind_mph, 1),
-            "gust_mph": None if self.gust_mph is None else round(self.gust_mph, 1),
+            "gust_mph": r(self.gust_mph, 1),
             "rain_in_hr": round(self.rain_in_hr, 3),
             "snow_in_hr": round(self.snow_in_hr, 3),
             "forecast_time": self.forecast_time,
+            "temperature_f": r(self.temperature_f, 1),
+            "precip_probability": None if self.precip_probability is None else round(self.precip_probability),
+            "visibility_mi": r(self.visibility_mi, 1),
+            "weather_code": self.weather_code,
+            "conditions": describe(self.weather_code),
         }
 
 
@@ -52,6 +71,10 @@ class HourlySeries:
     rain_in: list[float | None]
     showers_in: list[float | None]
     snow_in: list[float | None]
+    temperature_f: list[float | None] = field(default_factory=list)
+    precip_probability: list[float | None] = field(default_factory=list)
+    visibility_ft: list[float | None] = field(default_factory=list)
+    weather_code: list[float | None] = field(default_factory=list)
 
     @property
     def end(self) -> int:
@@ -74,10 +97,17 @@ class HourlySeries:
         snow = self._value(self.snow_in, precip_ts)
         if wind is None or rain is None or snow is None:
             return None
+        instant_ts = nearest_hour(eta)
+        visibility_ft = self._value(self.visibility_ft, instant_ts)
+        code = self._value(self.weather_code, instant_ts)
         return WeatherSample(
             wind_mph=wind,
             gust_mph=self._value(self.gust_mph, precip_ts),
             rain_in_hr=rain + (showers or 0.0),
             snow_in_hr=snow,
             forecast_time=precip_ts,
+            temperature_f=self._value(self.temperature_f, instant_ts),
+            precip_probability=self._value(self.precip_probability, precip_ts),
+            visibility_mi=None if visibility_ft is None else visibility_ft / FEET_PER_MILE,
+            weather_code=None if code is None else int(code),
         )

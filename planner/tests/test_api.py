@@ -168,7 +168,21 @@ class TestAnalysis:
             "score",
             "factors",
         }
-        assert set(cps[1]["weather"]) == {"wind_mph", "gust_mph", "rain_in_hr", "snow_in_hr", "forecast_time"}
+        assert set(cps[1]["weather"]) == {
+            "wind_mph",
+            "gust_mph",
+            "rain_in_hr",
+            "snow_in_hr",
+            "forecast_time",
+            "temperature_f",
+            "precip_probability",
+            "visibility_mi",
+            "weather_code",
+            "conditions",
+        }
+        assert cps[1]["weather"]["temperature_f"] == 55.0
+        assert cps[1]["weather"]["visibility_mi"] == 10.0
+        assert cps[1]["weather"]["conditions"] == "Partly cloudy"
         etas = [c["eta"] for c in cps]
         assert etas == sorted(etas)
         total_mi = plan["routes"][0]["distance_m"] / 1609.344
