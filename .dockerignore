@@ -1,0 +1,16 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.sqlite3
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+planner/tests/
+.DS_Store

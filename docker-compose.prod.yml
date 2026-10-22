@@ -1,0 +1,48 @@
+# Production on a VPS: Caddy (automatic HTTPS) → gunicorn → Redis.
+# The backend image is built by CI and pulled from GHCR; deploys run
+# deploy/remote-deploy.sh, which sets BACKEND_IMAGE to the commit's tag.
+# See deploy/DEPLOY.md.
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  backend:
+    image: ${BACKEND_IMAGE:-ghcr.io/eyob-smax/spotter-backend:latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DEBUG: "0"
+      REDIS_URL: redis://redis:6379/0
+    expose:
+      - "8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  caddy_data:
+  caddy_config:
