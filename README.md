@@ -76,7 +76,7 @@ planner/
 4. **Load rules** use strict comparison on weight ("> 30,000 lb"), and wind bands `45 ≤ w < 55` and `35 ≤ w < 45`. A load rule can raise a checkpoint's level but never lower it.
 5. **Each checkpoint covers the stretch halfway to its neighbours on each side.** That's how "Severe miles" and "High miles" are measured, and these stretches always add up to the route length.
 6. **Ranking:**
-   - Routes are ordered by fewest No-Travel miles first (not in the brief, but a No-Travel route shouldn't win on time), then fewest Severe miles, fewest High miles, lowest mile-weighted average risk (Low = 0 … No Travel = 4), and shortest travel time.
+   - Routes are ordered by fewest No-Travel miles first (not in the brief, but a No-Travel route shouldn't win on time), then fewest Severe miles, fewest High miles, lowest mile-weighted average risk, and shortest travel time. Average risk uses each checkpoint's continuous 0–4 score (its integer part is the level: Low 0 … No Travel 4), so routes that are all Low still differ by how close their weather comes to the Moderate thresholds.
    - Miles are compared at 0.1 mi and average risk at 0.01, so floating-point noise never decides.
 7. **Explanation:** the reason compares the winner with the fastest route, or with the runner-up when the winner is the fastest, and states the extra driving time.
 8. **Departure** can be up to 7 days ahead. Up to 15 minutes in the past is treated as now. The heatmap covers 48 h from the departure hour.

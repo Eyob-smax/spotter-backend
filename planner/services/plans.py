@@ -257,7 +257,12 @@ def analyze(plan_id: str, interval_mi: int) -> dict:
                 }
             )
             segments.append(
-                ScoredSegment(mile=cp.mile, segment_mi=cp.segment_mi, level=assessment.level if assessment else None)
+                ScoredSegment(
+                    mile=cp.mile,
+                    segment_mi=cp.segment_mi,
+                    level=assessment.level if assessment else None,
+                    score=assessment.score if assessment else None,
+                )
             )
         summary = summarize(r["id"], r["duration_s"], segments)
         summaries.append(summary)

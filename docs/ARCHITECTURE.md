@@ -125,7 +125,7 @@ Every factor carries a human-readable message, such as "Wind 47 mph with 42,000 
 ### 4.2 Checkpoint risk aggregation (`recommend.summarize`)
 - `miles_by_risk[level] += segment_mi`.
 - Risk scores: low 0, moderate 1, high 2, severe 3, No Travel 4.
-- `avg_risk` is the mile-weighted mean of those scores, excluding unknown miles.
+- `avg_risk` is the mile-weighted mean of each checkpoint's continuous 0–4 score (so all-Low routes still differ), excluding unknown miles.
 - `blocked` is true if there are any No Travel miles.
 
 ### 4.3 Ranking (`recommend.rank`)

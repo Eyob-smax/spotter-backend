@@ -27,6 +27,13 @@ class TestSummarize:
         segments = [ScoredSegment(0, 90, L), ScoredSegment(90, 10, S)]
         assert summarize("A", 1, segments).avg_risk == pytest.approx(0.3)
 
+    def test_average_uses_continuous_scores_when_present(self):
+        # Two all-Low routes still differ: 0.1 vs 0.8 on the 0-4 scale.
+        calm = summarize("A", 1, [ScoredSegment(0, 10, L, score=0.1), ScoredSegment(10, 10, L, score=0.1)])
+        breezy = summarize("B", 1, [ScoredSegment(0, 10, L, score=0.8), ScoredSegment(10, 10, L, score=0.8)])
+        assert calm.avg_risk == pytest.approx(0.1) and breezy.avg_risk == pytest.approx(0.8)
+        assert rank([breezy, calm]).route_id == "A"
+
     def test_unknown_excluded_from_average(self):
         s = make("A", [L, None, H])
         assert s.avg_risk == pytest.approx(1.0)

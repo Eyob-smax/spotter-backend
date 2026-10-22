@@ -6,6 +6,10 @@ Ranking follows the brief's order, with No Travel miles placed first
     1. fewest No Travel miles   2. fewest Severe miles   3. fewest High miles
     4. lowest mile-weighted average risk   5. shortest travel time
 
+Average risk uses each checkpoint's continuous score (0.0-4.0, whose integer
+part is the level), so routes that are all "Low" still differ by how close
+their weather comes to the Moderate thresholds instead of all averaging 0.
+
 Miles are compared at 0.1 mi and average risk at 0.01 so floating-point
 noise never decides a recommendation.
 """
@@ -25,6 +29,7 @@ class ScoredSegment:
     mile: float
     segment_mi: float
     level: Level | None  # None = forecast unavailable
+    score: float | None = None  # continuous 0-4 score; falls back to the level when absent
 
 
 @dataclass(frozen=True)
@@ -92,7 +97,7 @@ def summarize(route_id: str, duration_s: float, segments: list[ScoredSegment]) -
             unknown_count += 1
             continue
         miles[seg.level.id] += seg.segment_mi
-        weighted += int(seg.level) * seg.segment_mi
+        weighted += (seg.score if seg.score is not None else int(seg.level)) * seg.segment_mi
         known_mi += seg.segment_mi
         max_level = seg.level if max_level is None else max(max_level, seg.level)
         if seg.level is Level.NO_TRAVEL and first_blocked is None:
