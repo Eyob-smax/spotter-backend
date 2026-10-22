@@ -1,0 +1,9 @@
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "DJ"]
+ignore = ["E501", "B905"]  # zip() over offset slices is intentional
+
+[lint.per-file-ignores]
+"config/settings_test.py" = ["F403", "F405", "E402"]
