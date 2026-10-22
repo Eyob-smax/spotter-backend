@@ -27,7 +27,7 @@ VPS:  nginx (existing, HTTPS via certbot) ─▶ 127.0.0.1:8010 ─▶ docker co
 | | |
 |---|---|
 | IP | `164.90.224.22` |
-| API domain | `api.164-90-224-22.sslip.io`. sslip.io resolves this name to the IP with no DNS setup, and certbot can issue a certificate for it. To use your own domain, point an `A` record at the IP, then change `server_name`, `ALLOWED_HOSTS` and the GitHub `API_DOMAIN` variable |
+| API domain | `api.spotter.wearecerta.app`. The DNS `A` record (managed in cPanel) must point to `164.90.224.22`, with no `AAAA` record, before running certbot |
 | App directory | `/opt/spotter`, owned by user `deploy` |
 | Backend port | `127.0.0.1:8010`. To change it, set `BACKEND_PORT` in `.env` and update `proxy_pass` in the nginx site |
 
@@ -52,7 +52,7 @@ sudo -u deploy nano /opt/spotter/.env && sudo chmod 600 /opt/spotter/.env
 ```ini
 DEBUG=0
 SECRET_KEY=<python3 -c "import secrets; print(secrets.token_urlsafe(50))">
-ALLOWED_HOSTS=api.164-90-224-22.sslip.io
+ALLOWED_HOSTS=api.spotter.wearecerta.app
 CORS_ALLOWED_ORIGINS=https://<your-app>.vercel.app,http://localhost:5173
 NUM_PROXIES=1
 BACKEND_PORT=8010
@@ -66,7 +66,7 @@ scp deploy/nginx/spotter-api.conf root@164.90.224.22:/etc/nginx/sites-available/
 ssh root@164.90.224.22
 ln -s /etc/nginx/sites-available/spotter-api.conf /etc/nginx/sites-enabled/
 nginx -t && systemctl reload nginx
-certbot --nginx -d api.164-90-224-22.sslip.io      # issues the certificate and adds the HTTPS server + redirect
+certbot --nginx -d api.spotter.wearecerta.app      # issues the certificate and adds the HTTPS server + redirect
 ```
 
 ### 5. GitHub repository settings (*Settings → Secrets and variables → Actions*)
@@ -76,7 +76,7 @@ certbot --nginx -d api.164-90-224-22.sslip.io      # issues the certificate and 
 | Secret | `DEPLOY_USER` | `deploy` |
 | Secret | `DEPLOY_SSH_KEY` | Contents of `~/.ssh/spotter_deploy`, the **private** key |
 | Secret | `DEPLOY_KNOWN_HOSTS` | Output of `ssh-keyscan -t ed25519,ecdsa,rsa 164.90.224.22` |
-| Variable | `API_DOMAIN` | `api.164-90-224-22.sslip.io` |
+| Variable | `API_DOMAIN` | `api.spotter.wearecerta.app` |
 | Variable | `DEPLOY_PATH` | *(optional)* defaults to `/opt/spotter` |
 
 ```bash
@@ -84,13 +84,13 @@ gh secret set DEPLOY_HOST --body 164.90.224.22
 gh secret set DEPLOY_USER --body deploy
 gh secret set DEPLOY_SSH_KEY < ~/.ssh/spotter_deploy
 ssh-keyscan -t ed25519,ecdsa,rsa 164.90.224.22 2>/dev/null | gh secret set DEPLOY_KNOWN_HOSTS
-gh variable set API_DOMAIN --body api.164-90-224-22.sslip.io
+gh variable set API_DOMAIN --body api.spotter.wearecerta.app
 ```
 
 ### 6. Deploy
 Push to `master`, or re-run the workflow. When the run is green:
 ```bash
-curl https://api.164-90-224-22.sslip.io/api/health      # {"status":"ok","cache":"ok"}
+curl https://api.spotter.wearecerta.app/api/health      # {"status":"ok","cache":"ok"}
 ```
 
 ## Operating
@@ -103,6 +103,6 @@ cat .deployed-image                                        # currently deployed 
 ```
 
 ## Frontend (Vercel)
-- Set `VITE_API_URL=https://api.164-90-224-22.sslip.io` in the Vercel project.
+- Set `VITE_API_URL=https://api.spotter.wearecerta.app` in the Vercel project.
 - Add the Vercel URL to `CORS_ALLOWED_ORIGINS` in `/opt/spotter/.env`, then run `docker compose -f docker-compose.prod.yml up -d`.
 - The browser calls the API directly, with no Vercel rewrite, so rate limiting sees real client IPs.
