@@ -88,4 +88,46 @@ planner/
   - A paid Open-Meteo key can be set with `OPEN_METEO_API_KEY`.
 - **TomTom latency.** Requesting more alternatives makes TomTom much slower: about 12 s for 2 versus 21 s for 4 on LA → NYC. The gunicorn timeout is 90 s, and repeated searches come from cache in about 10 ms.
 - **Rate limits** are per client IP and configurable through `THROTTLE_*`. Every response carries an `X-Request-ID`, which also appears in the logs.
-- **CI/CD:** [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml). Every push is tested. Pushes to `master` build an image to GHCR and deploy it to the VPS over SSH, with health checks and automatic rollback. The VPS is shared, so the API runs as its own compose project behind the server's existing nginx. Setup and operations are in [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
+- **Deployment:** see [Deployment](#deployment) below.
+
+## Deployment
+```
+push to master ─▶ GitHub Actions (.github/workflows/ci-cd.yml)
+                   ├─ test    ruff, tests (≥95% coverage), Django deploy checks   ← every push / PR
+                   ├─ build   image ─▶ ghcr.io/eyob-smax/spotter-backend:sha-<commit>, :latest
+                   └─ deploy  SSH to the VPS: pull, restart, wait for health checks,
+                              roll back to the previous image if unhealthy, then check /api/health over HTTPS
+
+VPS (shared with other apps):  nginx (HTTPS via certbot) ─▶ 127.0.0.1:8010 ─▶ compose project "spotter": backend + redis
+```
+
+**On the server**, in `/opt/spotter`, owned by user `deploy`, which is in the `docker` group:
+- **`.env`:** the production settings. See [`.env.example`](.env.example) for the variables, with `DEBUG=0`, `ALLOWED_HOSTS=api.spotter.wearecerta.app`, `CORS_ALLOWED_ORIGINS=<frontend URL>`, `NUM_PROXIES=1` and `BACKEND_PORT=8010`. It's mode 600 and never committed.
+- **`docker-compose.prod.yml`:** uploaded by CI on every deploy. The backend is published on loopback only, and Redis stays internal.
+- **The nginx site for `api.spotter.wearecerta.app`:**
+  ```nginx
+  server {
+      listen 80;
+      server_name api.spotter.wearecerta.app;
+      proxy_read_timeout 90s;   # cross-country route lookups can take ~20 s upstream
+      location / {
+          proxy_pass http://127.0.0.1:8010;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;   # rate limits use the real client IP
+          proxy_set_header X-Forwarded-Proto $scheme;
+      }
+  }
+  ```
+  certbot adds the HTTPS block with `certbot --nginx -d api.spotter.wearecerta.app --redirect`.
+
+**GitHub settings** (*Settings → Secrets and variables → Actions*):
+- **Secrets:** `DEPLOY_HOST`, `DEPLOY_USER` (`deploy`), `DEPLOY_SSH_KEY` (the private key whose public half is in `/home/deploy/.ssh/authorized_keys`), and `DEPLOY_KNOWN_HOSTS` (output of `ssh-keyscan`).
+- **Variable:** `API_DOMAIN`.
+
+**Operating it**, as `deploy` in `/opt/spotter`:
+```bash
+docker compose -f docker-compose.prod.yml ps                 # health
+docker compose -f docker-compose.prod.yml logs -f backend    # request ids appear in [brackets]
+# manual rollback to an earlier commit's image:
+BACKEND_IMAGE=ghcr.io/eyob-smax/spotter-backend:sha-<commit> docker compose -f docker-compose.prod.yml up -d --wait
+```

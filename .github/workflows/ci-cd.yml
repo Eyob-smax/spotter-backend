@@ -3,6 +3,7 @@ name: CI/CD
 # test   → every push and pull request
 # build  → pushes to the default branch: image to GHCR (tags: sha-<short>, latest)
 # deploy → after build: SSH to the VPS, pull, restart, health-check, auto-rollback
+#          (the VPS runs the stack as compose project `spotter` behind its existing nginx)
 on:
   push:
   pull_request:
@@ -112,20 +113,43 @@ jobs:
           printf 'Host deploy-target\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 15\n' \
             "${{ secrets.DEPLOY_HOST }}" "${{ secrets.DEPLOY_USER }}" > ~/.ssh/config
 
-      - name: Upload compose files
-        run: |
-          # shellcheck disable=SC2029  # DEPLOY_PATH is meant to expand on the runner
-          ssh deploy-target "mkdir -p '$DEPLOY_PATH/deploy'"
-          scp docker-compose.prod.yml .env.example "deploy-target:$DEPLOY_PATH/"
-          scp deploy/remote-deploy.sh "deploy-target:$DEPLOY_PATH/deploy/"
+      - name: Upload compose file
+        run: scp docker-compose.prod.yml .env.example "deploy-target:$DEPLOY_PATH/"
 
       - name: Pull & restart (rolls back on failure)
         run: |
           # The job token can read this repo's GHCR package and expires when the job ends.
           # shellcheck disable=SC2029  # values are meant to expand on the runner
           echo "${{ secrets.GITHUB_TOKEN }}" | ssh deploy-target "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+          # Runs on the server: pull the image, wait for every container's health check,
+          # and restore the previously deployed image if the new one doesn't become healthy.
           # shellcheck disable=SC2029
-          ssh deploy-target "bash '$DEPLOY_PATH/deploy/remote-deploy.sh' '$IMAGE'"
+          ssh deploy-target "IMAGE='$IMAGE' APP_DIR='$DEPLOY_PATH' bash -s" <<'DEPLOY'
+          set -euo pipefail
+          cd "$APP_DIR"
+          export COMPOSE_FILE=docker-compose.prod.yml
+          test -f .env || { echo "error: $APP_DIR/.env is missing" >&2; exit 1; }
+          previous="$(cat .deployed-image 2>/dev/null || true)"
+          echo "Deploying $IMAGE (previous: ${previous:-none})"
+
+          export BACKEND_IMAGE="$IMAGE"
+          docker compose pull --quiet backend
+          if docker compose up -d --remove-orphans --wait --wait-timeout 120; then
+            echo "$IMAGE" > .deployed-image
+            # Shared host: only remove this project's old images (keep the 3 newest for rollbacks).
+            docker image ls "${IMAGE%:*}" --format '{{.Repository}}:{{.Tag}}' | tail -n +4 | xargs -r docker image rm > /dev/null 2>&1 || true
+            echo "Deployed $IMAGE"
+            exit 0
+          fi
+
+          echo "error: $IMAGE did not become healthy" >&2
+          docker compose logs --tail 80 backend >&2 || true
+          if [ -n "$previous" ] && [ "$previous" != "$IMAGE" ]; then
+            echo "Rolling back to $previous" >&2
+            BACKEND_IMAGE="$previous" docker compose up -d --remove-orphans --wait --wait-timeout 120 || true
+          fi
+          exit 1
+          DEPLOY
 
       - name: Public health check
         if: vars.API_DOMAIN != ''

@@ -1,8 +1,7 @@
 # Production on a shared VPS: the server's existing nginx terminates HTTPS and
-# proxies the API domain to 127.0.0.1:${BACKEND_PORT} (see deploy/nginx/).
-# The backend image is built by CI and pulled from GHCR; deploys run
-# deploy/remote-deploy.sh, which sets BACKEND_IMAGE to the commit's tag.
-# See deploy/DEPLOY.md.
+# proxies the API domain to 127.0.0.1:${BACKEND_PORT}. The backend image is built
+# by CI and pulled from GHCR; the deploy job sets BACKEND_IMAGE to the commit's
+# tag. See "Deployment" in README.md.
 name: spotter
 
 services:
