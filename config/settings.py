@@ -92,7 +92,13 @@ else:
     }
 
 # --- CORS -------------------------------------------------------------------
-CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+# Browsers may call the API only from these origins. Set CORS_ALLOWED_ORIGINS to override.
+DEFAULT_CORS_ORIGINS = [
+    "https://spotter-ai-navy.vercel.app",  # production frontend (Vercel)
+    "http://localhost:5173",  # local Vite dev server
+    "http://127.0.0.1:5173",
+]
+CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS") or DEFAULT_CORS_ORIGINS
 CORS_ALLOW_CREDENTIALS = False
 
 # --- Django REST framework -----------------------------------------------------

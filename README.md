@@ -102,7 +102,7 @@ VPS (shared with other apps):  nginx (HTTPS via certbot) ─▶ 127.0.0.1:8010 �
 ```
 
 **On the server**, in `/opt/spotter`, owned by user `deploy`, which is in the `docker` group:
-- **`.env`:** the production settings. See [`.env.example`](.env.example) for the variables, with `DEBUG=0`, `ALLOWED_HOSTS=api.spotter.wearecerta.app`, `CORS_ALLOWED_ORIGINS=<frontend URL>`, `NUM_PROXIES=1` and `BACKEND_PORT=8010`. It's mode 600 and never committed.
+- **`.env`:** the production settings. See [`.env.example`](.env.example) for the variables, with `DEBUG=0`, `ALLOWED_HOSTS=api.spotter.wearecerta.app`, `NUM_PROXIES=1` and `BACKEND_PORT=8010`. It's mode 600 and never committed. The frontend origins allowed by CORS (the Vercel URL and local dev) are set in `config/settings.py`, so changing them is a normal code change and deploy.
 - **`docker-compose.prod.yml`:** uploaded by CI on every deploy. The backend is published on loopback only, and Redis stays internal.
 - **The nginx site for `api.spotter.wearecerta.app`:**
   ```nginx
