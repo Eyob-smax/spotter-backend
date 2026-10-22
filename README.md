@@ -83,6 +83,53 @@ planner/
 8. **Departure** can be up to 7 days ahead. Up to 15 minutes in the past is treated as now. The heatmap covers 48 h from the departure hour.
 9. **Missing forecasts:** checkpoints are marked `unknown` and excluded from the average, the response includes a notice, and the result isn't cached.
 
+## Design decisions
+
+### What affects the risk level, and what doesn't
+Risk follows the brief's table exactly: each checkpoint takes the **worst of wind, rain and snow**, and the load rules can raise it. For example:
+- 0.17 in/hr of rain → Moderate
+- 0.60 in/hr → Severe
+- more than 3 in/hr of snow → No Travel
+
+The forecast also provides **temperature, visibility, chance of precipitation and a conditions description**. These are returned and shown to the driver but **don't change the level**, for three reasons:
+1. **The brief defines thresholds only** for wind, rain and snow, plus the load rules. Scoring other fields would invent rules the assessment didn't specify.
+2. **No double counting.** Rain and snow are measured amounts. Chance of precipitation and the conditions text describe the same weather, so scoring them would count it twice.
+3. **They still help.** The frontend shows them, including a freezing line on the temperature chart.
+
+### Why each checkpoint uses a different forecast hour per field
+Open-Meteo reports different fields in different ways:
+- **Wind speed is a snapshot** at the timestamp. A truck arriving at 14:20 uses the **nearest** snapshot, 14:00.
+- **Rain, showers, snowfall and gusts are totals for the preceding hour.** The value stamped 15:00 covers 14:00–15:00. A truck at 14:20 is inside that window, so it uses **15:00**.
+
+**Why this matters:** using the nearest hour for everything would read the 14:00 total, which is the rain from 13:00–14:00, an hour already over. If a storm arrives at 14:15, the 14:00 value says 0.00 in/hr ("dry") while the 15:00 value says 0.60 in/hr ("Severe"). The hour-ending rule picks the hour the truck is actually in. It also makes the hourly total match the brief's **in/hr** thresholds directly. Unit tests cover ETAs on the hour, just after it, and just before it.
+
+### Why detour waypoints (the "Detour" routes)
+- **The brief requires 3 route options,** but TomTom doesn't guarantee 3 alternatives. Live, NYC → Chicago returned only 2. Asking for more is slow (about 21 s for 4 alternatives cross-country) and still not guaranteed.
+- **When fewer than 3 distinct routes come back,** the backend creates the missing ones:
+  1. Take a point at 50% of the fastest route's length, then 33% or 67% if needed.
+  2. Move it **sideways**, at a right angle to the road, by 20% of the straight-line trip distance, clamped between 15 km and 120 km.
+  3. Ask TomTom for a truck route forced through that point.
+  4. Keep it only if it's **distinct** (less than 90% overlap with the others) and **reasonable** (no more than 1.6× the fastest route's time).
+- **The point of this project is comparing weather.** Separate corridors can meet different weather; near-copies of the same highway can't. Detour routes are labelled as such in the UI.
+
+### Why Redis and not Postgres
+Nothing needs to be kept permanently: there are no accounts or trip history. Everything is temporary and expires: trip plans after 1 h, forecasts per map cell after 30 min, geocoding after 24 h, rate-limit counters after a minute. Redis keeps this in memory, expires it automatically, and is shared by every gunicorn worker. Postgres would add tables, migrations, backups and another service to secure, for data we throw away. It would be the right addition if saved trips or accounts were added, alongside Redis as the cache.
+
+### Why gunicorn
+Django's `runserver` is for development only. Gunicorn is the standard production server for Django: it manages worker processes, restarts crashed ones, and enforces timeouts. It uses **threaded workers (`gthread`)** because the API mostly *waits* on TomTom and Open-Meteo, up to about 20 s for a cross-country route, and threads keep serving other requests meanwhile. nginx sits in front and handles HTTPS.
+
+### Why Docker and docker compose
+- **One image everywhere:** CI tests the code and builds a single image; production runs exactly that image.
+- **Isolation on a shared server:** compose runs the backend and its own Redis as project `spotter`, published only on `127.0.0.1`. It can't conflict with the server's other apps.
+- **Easy rollback:** every commit has its own image tag, and the deploy rolls back automatically if the new image isn't healthy.
+- **Local development:** `docker compose up` starts everything with one command.
+
+### Why GitHub Actions
+The code is on GitHub, and Actions is built in. Every push runs lint, the tests (failing below 95% coverage) and Django's deploy checks. A push to `master` then builds the image to GHCR and deploys it over SSH, with health checks and automatic rollback. Nobody runs commands on the server by hand.
+
+### Why reverse geocoding goes through the backend
+Map clicks and "Use my location" produce coordinates; reverse geocoding turns them into a readable address for the form and the route header. It runs through `/api/geocode/reverse`, so the TomTom key never reaches the browser, and results are cached for 24 h. Where there's no address, such as open water, the label falls back to the coordinates.
+
 ## Operational notes
 - **Weather quota.** The free Open-Meteo tier allows 600 locations per minute, so one search is capped at about 340 weather lookups: up to 120 for checkpoints and 220 for the heatmap. Long trips use a coarser grid, with a notice.
   - On HTTP 429 the API stops calling Open-Meteo for 60 s and returns `retry_after`.
