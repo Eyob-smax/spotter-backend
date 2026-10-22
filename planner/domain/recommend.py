@@ -10,8 +10,11 @@ Average risk uses each checkpoint's continuous score (0.0-4.0, whose integer
 part is the level), so routes that are all "Low" still differ by how close
 their weather comes to the Moderate thresholds instead of all averaging 0.
 
-Miles are compared at 0.1 mi and average risk at 0.01 so floating-point
-noise never decides a recommendation.
+Miles are compared at 0.1 mi so floating-point noise never decides.
+Average risks within AVG_RISK_TOLERANCE (a quarter of a level) count as
+equal, so travel time decides between routes whose weather is effectively
+the same - otherwise a calm route could lose hours to a marginally calmer
+one. This is how the ranking "balances weather risk and travel time".
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from .risk import UNKNOWN, Level
 
 CRITERIA = ("no_travel_mi", "severe_mi", "high_mi", "avg_risk", "duration_s")
 UNKNOWN_AVG_SENTINEL = float(Level.NO_TRAVEL)
+AVG_RISK_TOLERANCE = 0.25
 
 
 @dataclass(frozen=True)
@@ -59,15 +63,12 @@ class RouteSummary:
     def blocked(self) -> bool:
         return self.first_blocked_mile is not None
 
-    def sort_key(self) -> tuple[float, float, float, float, float]:
-        avg = UNKNOWN_AVG_SENTINEL if self.avg_risk is None else self.avg_risk
-        return (
-            round(self.no_travel_mi, 1),
-            round(self.severe_mi, 1),
-            round(self.high_mi, 1),
-            round(avg, 2),
-            round(self.duration_s),
-        )
+    def miles_key(self) -> tuple[float, float, float]:
+        return (round(self.no_travel_mi, 1), round(self.severe_mi, 1), round(self.high_mi, 1))
+
+    @property
+    def avg_for_ranking(self) -> float:
+        return UNKNOWN_AVG_SENTINEL if self.avg_risk is None else self.avg_risk
 
     def to_dict(self) -> dict:
         return {
@@ -167,8 +168,31 @@ def _reason(winner: RouteSummary, runner_up: RouteSummary, factor: str) -> str:
     return f"Same weather risk as {other}, and {saved} faster"
 
 
+def _pick_best(candidates: list[RouteSummary]) -> RouteSummary:
+    """Fewest No-Travel, then Severe, then High miles; among those, every route within the
+    average-risk tolerance of the lowest counts as equally safe and the fastest wins
+    (input order breaks exact ties)."""
+    best_miles = min(c.miles_key() for c in candidates)
+    group = [c for c in candidates if c.miles_key() == best_miles]
+    lowest = min(c.avg_for_ranking for c in group)
+    equally_safe = [c for c in group if c.avg_for_ranking - lowest < AVG_RISK_TOLERANCE]
+    return min(equally_safe, key=lambda c: round(c.duration_s))
+
+
+def _deciding_factor(winner: RouteSummary, other: RouteSummary) -> str | None:
+    """The first criterion on which the two routes differ, using the same rules as the ranking."""
+    for name, w, o in zip(CRITERIA[:3], winner.miles_key(), other.miles_key()):
+        if w != o:
+            return name
+    if abs(winner.avg_for_ranking - other.avg_for_ranking) >= AVG_RISK_TOLERANCE:
+        return "avg_risk"
+    if round(winner.duration_s) != round(other.duration_s):
+        return "duration_s"
+    return None
+
+
 def rank(summaries: list[RouteSummary]) -> Recommendation:
-    """Order routes by the ranking key and explain the choice.
+    """Order routes by the ranking rules and explain the choice.
 
     The explanation compares the winner with the route a driver would otherwise
     take: the fastest one. If the winner *is* the fastest, it is compared with
@@ -176,7 +200,12 @@ def rank(summaries: list[RouteSummary]) -> Recommendation:
     """
     if not summaries:
         raise ValueError("Cannot rank an empty list of routes.")
-    ordered = sorted(summaries, key=lambda s: s.sort_key())  # stable: input order breaks exact ties
+    remaining = list(summaries)
+    ordered: list[RouteSummary] = []
+    while remaining:
+        best = _pick_best(remaining)
+        ordered.append(best)
+        remaining.remove(best)
     winner = ordered[0]
     fastest = min(summaries, key=lambda s: round(s.duration_s))
 
@@ -187,10 +216,7 @@ def rank(summaries: list[RouteSummary]) -> Recommendation:
     else:
         other = ordered[1] if fastest is winner else fastest
         compared_to = other.route_id
-        for name, w, o in zip(CRITERIA, winner.sort_key(), other.sort_key()):
-            if w != o:
-                deciding = name
-                break
+        deciding = _deciding_factor(winner, other)
         if deciding is None:
             reason = f"Routes {winner.route_id} and {other.route_id} are equivalent on risk and time"
         else:

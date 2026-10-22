@@ -130,7 +130,7 @@ Every factor carries a human-readable message, such as "Wind 47 mph with 42,000 
 
 ### 4.3 Ranking (`recommend.rank`)
 - Sort key: `(no_travel_mi, severe_mi, high_mi, avg_risk, duration_s)`.
-- Miles are rounded to 0.1 and `avg_risk` to 0.01 before comparing, so float noise never decides.
+- Miles are rounded to 0.1 before comparing, so float noise never decides. Average risks within 0.25 of the lowest (among routes tied on miles) count as equally safe, and the fastest of those wins; ranking repeats this on the remaining routes.
 - **No Travel miles rank first.** This is an assumption: the brief doesn't list them.
 - **Reason:** the winner is compared with the route a driver would otherwise pick, the **fastest** one. If the winner is the fastest, it is compared with the runner-up. The reason names the first criterion where they differ, and `compared_to` says which route was used. Examples:
   - "Fewest severe-risk miles: 0 mi vs 12 mi on Route A (fastest); adds 26 min"

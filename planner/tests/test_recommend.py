@@ -137,6 +137,28 @@ class TestRank:
         assert rec.compared_to == "B" and rec.deciding_factor == "high_mi"
         assert "(fastest)" not in rec.reason
 
+    def test_nearly_equal_average_risk_lets_travel_time_decide(self):
+        # Both routes are entirely Low; 0.23 vs 0.35 is within the tolerance, so the faster route wins.
+        fast = summarize("A", 27_000, [ScoredSegment(0, 100, L, score=0.35)])
+        slow = summarize("C", 32_400, [ScoredSegment(0, 100, L, score=0.23)])
+        rec = rank([slow, fast])
+        assert rec.route_id == "A" and rec.deciding_factor == "duration_s"
+        assert rec.reason == "Same weather risk as Route C, and 1 h 30 min faster"
+
+    def test_clearly_lower_average_risk_still_wins(self):
+        fast = summarize("A", 27_000, [ScoredSegment(0, 100, L, score=0.9)])
+        slow = summarize("C", 32_400, [ScoredSegment(0, 100, L, score=0.3)])
+        rec = rank([fast, slow])
+        assert rec.route_id == "C" and rec.deciding_factor == "avg_risk"
+
+    def test_tolerance_is_measured_from_the_safest_route(self):
+        # 0.0, 0.2 and 0.4: C and B are equally safe (within 0.25 of C), so the faster B wins.
+        # Then C (0.0) is clearly safer than A (0.4), so C comes second despite being slowest.
+        a = summarize("A", 100, [ScoredSegment(0, 10, L, score=0.4)])
+        b = summarize("B", 200, [ScoredSegment(0, 10, L, score=0.2)])
+        c = summarize("C", 300, [ScoredSegment(0, 10, L, score=0.0)])
+        assert rank([a, b, c]).ranking == ["B", "C", "A"]
+
     def test_empty_rejected(self):
         with pytest.raises(ValueError):
             rank([])
