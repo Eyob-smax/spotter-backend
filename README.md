@@ -88,4 +88,4 @@ planner/
   - A paid Open-Meteo key can be set with `OPEN_METEO_API_KEY`.
 - **TomTom latency.** Requesting more alternatives makes TomTom much slower: about 12 s for 2 versus 21 s for 4 on LA → NYC. The gunicorn timeout is 90 s, and repeated searches come from cache in about 10 ms.
 - **Rate limits** are per client IP and configurable through `THROTTLE_*`. Every response carries an `X-Request-ID`, which also appears in the logs.
-- **CI/CD:** [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml). Every push is tested. Pushes to `master` build an image to GHCR and deploy it to the VPS over SSH, with health checks and automatic rollback. Setup and operations are in [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
+- **CI/CD:** [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml). Every push is tested. Pushes to `master` build an image to GHCR and deploy it to the VPS over SSH, with health checks and automatic rollback. The VPS is shared, so the API runs as its own compose project behind the server's existing nginx. Setup and operations are in [`deploy/DEPLOY.md`](deploy/DEPLOY.md).

@@ -1,4 +1,4 @@
-# Deployment (CI/CD to a DigitalOcean VPS)
+# Deployment (CI/CD to a shared DigitalOcean VPS)
 
 ```
 push to master ─▶ GitHub Actions
@@ -6,12 +6,20 @@ push to master ─▶ GitHub Actions
                    ├─ build   Docker image ─▶ ghcr.io/eyob-smax/spotter-backend:sha-<commit> and :latest
                    └─ deploy  SSH ─▶ VPS: pull image, restart, wait for health checks,
                               roll back automatically if unhealthy, then check https://<domain>/api/health
-VPS (docker compose):  Caddy (automatic HTTPS) ─▶ gunicorn/Django ─▶ Redis
+
+VPS:  nginx (existing, HTTPS via certbot) ─▶ 127.0.0.1:8010 ─▶ docker compose project "spotter":
+                                                              backend (gunicorn/Django) + redis
 ```
 
-- Pull requests and other branches only run **test**.
-- The server never builds code: it pulls the image CI built and tested.
-- The deploy job uses the `production` environment, so you can add required reviewers in GitHub (*Settings → Environments*) if you want a manual approval step.
+**This server also hosts other apps,** so the deployment stays out of their way:
+- The compose project is named `spotter`; its containers, network and Redis are separate from other projects.
+- The backend is published only on `127.0.0.1:8010`. Redis isn't published at all.
+- nginx gets one extra site file. Nothing else in nginx, the firewall or Docker changes.
+- Image cleanup removes only old `spotter-backend` images, and keeps the last 3 for rollbacks.
+
+**Running the pipeline:**
+- Pull requests and other branches run **test** only.
+- The deploy job uses the `production` environment. To require manual approval, add reviewers under *Settings → Environments*.
 - **Manual re-deploy:** *Actions → CI/CD → Run workflow* on `master`.
 - **Roll back to an earlier commit:** on the server, run `bash /opt/spotter/deploy/remote-deploy.sh ghcr.io/eyob-smax/spotter-backend:sha-<commit>`.
 
@@ -19,8 +27,9 @@ VPS (docker compose):  Caddy (automatic HTTPS) ─▶ gunicorn/Django ─▶ Red
 | | |
 |---|---|
 | IP | `164.90.224.22` |
-| API domain | `api.164-90-224-22.sslip.io`. sslip.io resolves this name to the IP with no DNS setup, and Caddy gets a Let's Encrypt certificate for it. You can switch to your own domain later by pointing an `A` record at the IP and changing `API_DOMAIN` |
+| API domain | `api.164-90-224-22.sslip.io`. sslip.io resolves this name to the IP with no DNS setup, and certbot can issue a certificate for it. To use your own domain, point an `A` record at the IP, then change `server_name`, `ALLOWED_HOSTS` and the GitHub `API_DOMAIN` variable |
 | App directory | `/opt/spotter`, owned by user `deploy` |
+| Backend port | `127.0.0.1:8010`. To change it, set `BACKEND_PORT` in `.env` and update `proxy_pass` in the nginx site |
 
 ## One-time setup
 
@@ -29,45 +38,47 @@ VPS (docker compose):  Caddy (automatic HTTPS) ─▶ gunicorn/Django ─▶ Red
 ssh-keygen -t ed25519 -N "" -C "github-actions-deploy" -f ~/.ssh/spotter_deploy
 ```
 
-### 2. Bootstrap the server (as root)
+### 2. Prepare the server (as root)
 ```bash
 scp deploy/bootstrap-server.sh root@164.90.224.22:/root/
 ssh root@164.90.224.22 "bash /root/bootstrap-server.sh \"$(cat ~/.ssh/spotter_deploy.pub)\""
 ```
-This installs Docker, creates the `deploy` user with the CI key, creates `/opt/spotter` and opens ports 22/80/443.
+This checks that Docker is present, creates the `deploy` user with the CI key, creates `/opt/spotter`, and warns you if port 8010 is already taken.
 
-> **Port 80/443:** this server currently runs a system **nginx**, showing its default page. Caddy needs those ports.
-> - **If nginx serves nothing else,** re-run the script with `--stop-nginx` added after the key.
-> - **If nginx hosts other sites,** don't stop it. Ask to switch this deployment to run behind nginx instead of Caddy.
-
-### 3. Create the server's `.env` (secrets live only on the server)
+### 3. Server `.env` (secrets live only on the server)
 ```bash
-ssh root@164.90.224.22
-sudo -u deploy nano /opt/spotter/.env
+sudo -u deploy nano /opt/spotter/.env && sudo chmod 600 /opt/spotter/.env
 ```
 ```ini
 DEBUG=0
 SECRET_KEY=<python3 -c "import secrets; print(secrets.token_urlsafe(50))">
 ALLOWED_HOSTS=api.164-90-224-22.sslip.io
-API_DOMAIN=api.164-90-224-22.sslip.io
 CORS_ALLOWED_ORIGINS=https://<your-app>.vercel.app,http://localhost:5173
 NUM_PROXIES=1
+BACKEND_PORT=8010
 TOMTOM_API_KEY=<your key>
 LOG_LEVEL=INFO
 ```
-Then run `chmod 600 /opt/spotter/.env`.
 
-### 4. GitHub repository settings (*Settings → Secrets and variables → Actions*)
+### 4. nginx site and HTTPS
+```bash
+scp deploy/nginx/spotter-api.conf root@164.90.224.22:/etc/nginx/sites-available/spotter-api.conf
+ssh root@164.90.224.22
+ln -s /etc/nginx/sites-available/spotter-api.conf /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+certbot --nginx -d api.164-90-224-22.sslip.io      # issues the certificate and adds the HTTPS server + redirect
+```
+
+### 5. GitHub repository settings (*Settings → Secrets and variables → Actions*)
 | Kind | Name | Value |
 |---|---|---|
 | Secret | `DEPLOY_HOST` | `164.90.224.22` |
 | Secret | `DEPLOY_USER` | `deploy` |
 | Secret | `DEPLOY_SSH_KEY` | Contents of `~/.ssh/spotter_deploy`, the **private** key |
-| Secret | `DEPLOY_KNOWN_HOSTS` | Output of `ssh-keyscan -t ed25519,ecdsa,rsa 164.90.224.22`. Compare the fingerprint with the droplet console (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) |
+| Secret | `DEPLOY_KNOWN_HOSTS` | Output of `ssh-keyscan -t ed25519,ecdsa,rsa 164.90.224.22` |
 | Variable | `API_DOMAIN` | `api.164-90-224-22.sslip.io` |
 | Variable | `DEPLOY_PATH` | *(optional)* defaults to `/opt/spotter` |
 
-With the GitHub CLI:
 ```bash
 gh secret set DEPLOY_HOST --body 164.90.224.22
 gh secret set DEPLOY_USER --body deploy
@@ -76,12 +87,11 @@ ssh-keyscan -t ed25519,ecdsa,rsa 164.90.224.22 2>/dev/null | gh secret set DEPLO
 gh variable set API_DOMAIN --body api.164-90-224-22.sslip.io
 ```
 
-### 5. Deploy
-Push to `master`. When the run is green:
+### 6. Deploy
+Push to `master`, or re-run the workflow. When the run is green:
 ```bash
 curl https://api.164-90-224-22.sslip.io/api/health      # {"status":"ok","cache":"ok"}
 ```
-The interactive docs are at <https://api.164-90-224-22.sslip.io/api/docs>.
 
 ## Operating
 ```bash
@@ -93,6 +103,6 @@ cat .deployed-image                                        # currently deployed 
 ```
 
 ## Frontend (Vercel)
-Set `VITE_API_URL=https://api.164-90-224-22.sslip.io` in the Vercel project, and add the Vercel URL to `CORS_ALLOWED_ORIGINS` in the server `.env`. The browser calls the API directly, with no Vercel rewrite:
-- A rewrite would hide client IPs from rate limiting.
-- Vercel's proxy timeout is shorter than the slowest cross-country route lookups (about 20 s).
+- Set `VITE_API_URL=https://api.164-90-224-22.sslip.io` in the Vercel project.
+- Add the Vercel URL to `CORS_ALLOWED_ORIGINS` in `/opt/spotter/.env`, then run `docker compose -f docker-compose.prod.yml up -d`.
+- The browser calls the API directly, with no Vercel rewrite, so rate limiting sees real client IPs.

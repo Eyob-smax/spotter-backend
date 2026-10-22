@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
-# One-time server setup (Ubuntu 22.04/24.04). Run as root on the VPS:
+# One-time setup on a server that already runs Docker and nginx for other apps.
+# Run as root:
 #
-#   sudo bash bootstrap-server.sh "<CI public key>" [--stop-nginx]
+#   sudo bash bootstrap-server.sh "<CI public key>"
 #
-# Idempotent: safe to run again. It
-#   1. installs Docker Engine + compose plugin (if missing)
+# Idempotent. It only
+#   1. checks Docker + the compose plugin are present (it never installs or reconfigures them)
 #   2. creates a non-root `deploy` user in the docker group, authorised for the CI key
-#   3. creates /opt/spotter owned by `deploy` (CI uploads compose files there)
-#   4. allows SSH, HTTP and HTTPS through ufw
-#   5. with --stop-nginx: stops and disables a system nginx holding ports 80/443
-#      (Caddy needs them). Only use this if nginx serves nothing else.
+#   3. creates /opt/spotter owned by `deploy` (CI uploads the compose file there)
+# It deliberately does NOT touch nginx, the firewall or other containers.
 set -euo pipefail
 
-PUBKEY="${1:?usage: bootstrap-server.sh \"<CI public key>\" [--stop-nginx]}"
-STOP_NGINX="${2:-}"
+PUBKEY="${1:?usage: bootstrap-server.sh \"<CI public key>\"}"
 DEPLOY_USER=deploy
 APP_DIR=/opt/spotter
 
@@ -23,8 +21,9 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 echo "==> Docker"
-if ! command -v docker > /dev/null; then
-  curl -fsSL https://get.docker.com | sh
+if ! docker compose version > /dev/null 2>&1; then
+  echo "error: Docker with the compose plugin is required (docker compose version failed)" >&2
+  exit 1
 fi
 docker compose version
 
@@ -41,26 +40,12 @@ chmod 600 "$AUTH"
 echo "==> App directory ${APP_DIR}"
 install -d -m 750 -o "$DEPLOY_USER" -g "$DEPLOY_USER" "$APP_DIR" "$APP_DIR/deploy"
 
-echo "==> Firewall"
-if command -v ufw > /dev/null; then
-  ufw allow OpenSSH > /dev/null
-  ufw allow 80/tcp > /dev/null
-  ufw allow 443/tcp > /dev/null
-  ufw allow 443/udp > /dev/null
-  ufw --force enable > /dev/null
-  ufw status | head -12
-fi
-
-if [[ "$STOP_NGINX" == "--stop-nginx" ]] && systemctl is-active --quiet nginx; then
-  echo "==> Stopping system nginx (Caddy will serve 80/443)"
-  systemctl disable --now nginx
-fi
-
-if ss -ltnp 2> /dev/null | grep -qE ':(80|443)\s'; then
-  echo "warning: something is still listening on port 80/443:" >&2
-  ss -ltnp | grep -E ':(80|443)\s' >&2 || true
-  echo "Caddy will not start until those ports are free." >&2
+PORT="${BACKEND_PORT:-8010}"
+if ss -ltn 2> /dev/null | grep -q ":${PORT} "; then
+  echo "warning: port ${PORT} is already in use on this host. Set BACKEND_PORT in ${APP_DIR}/.env" >&2
+  echo "         and the proxy_pass port in the nginx site to a free port." >&2
 fi
 
 echo
-echo "Done. Next: create ${APP_DIR}/.env as ${DEPLOY_USER} (see .env.example), then push to master."
+echo "Done. Next: create ${APP_DIR}/.env as ${DEPLOY_USER} (see .env.example), add the nginx site"
+echo "(deploy/nginx/spotter-api.conf) and run certbot, then push to master."

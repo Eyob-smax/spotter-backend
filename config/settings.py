@@ -111,7 +111,7 @@ REST_FRAMEWORK = {
         "heatmap": os.getenv("THROTTLE_HEATMAP", "30/min"),
         "geocode": os.getenv("THROTTLE_GEOCODE", "120/min"),
     },
-    # Number of trusted proxies in front of the app (Caddy = 1), so throttling
+    # Number of trusted proxies in front of the app (the server's nginx = 1), so throttling
     # keys on the real client IP from X-Forwarded-For.
     "NUM_PROXIES": int(os.getenv("NUM_PROXIES")) if os.getenv("NUM_PROXIES") else None,
 }
@@ -137,7 +137,7 @@ SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 X_FRAME_OPTIONS = "DENY"
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
-# TLS is terminated by Caddy, which also redirects HTTP to HTTPS and sends HSTS.
+# TLS is terminated by the server's nginx (certbot), which also redirects HTTP to HTTPS.
 # CSRF middleware is unnecessary: the API is stateless (no cookies or sessions).
 SECURE_SSL_REDIRECT = False
 SILENCED_SYSTEM_CHECKS = ["security.W003", "security.W004", "security.W008"]

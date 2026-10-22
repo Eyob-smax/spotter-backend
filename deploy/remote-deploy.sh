@@ -12,7 +12,6 @@ IMAGE="${1:?usage: remote-deploy.sh <image>}"
 cd "$(dirname "$0")/.."
 
 export COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
-export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-spotter}"
 STATE_FILE=.deployed-image
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-120}"
 
@@ -28,8 +27,15 @@ export BACKEND_IMAGE="$IMAGE"
 docker compose pull --quiet backend
 
 if docker compose up -d --remove-orphans --wait --wait-timeout "$WAIT_TIMEOUT"; then
+  # Also prove the API answers on the port nginx proxies to.
+  port="$(grep -E '^BACKEND_PORT=' .env | cut -d= -f2 || true)"
+  if ! curl -fsS --max-time 5 "http://127.0.0.1:${port:-8010}/api/health" > /dev/null; then
+    echo "warning: containers are healthy but http://127.0.0.1:${port:-8010}/api/health did not answer" >&2
+  fi
   echo "$IMAGE" > "$STATE_FILE"
-  docker image prune -f --filter "until=168h" > /dev/null
+  # Shared host: only clean up our own old images (keep the 3 most recent for rollbacks).
+  repo="${IMAGE%:*}"
+  docker image ls "$repo" --format '{{.Repository}}:{{.Tag}}' | tail -n +4 | xargs -r docker image rm > /dev/null 2>&1 || true
   echo "Deployed ${IMAGE}"
   exit 0
 fi

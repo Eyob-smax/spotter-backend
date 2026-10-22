@@ -187,8 +187,8 @@ Every factor carries a human-readable message, such as "Wind 47 mph with 42,000 
 Tools: pytest, pytest-django, `responses` to mock HTTP, pytest-cov. Target over 90% coverage of `domain/` and `services/`.
 
 ## 8. Deployment
-- **VPS:** `docker compose -f docker-compose.prod.yml up -d` runs **Caddy** (automatic HTTPS), **backend** (gunicorn gthread with 2 workers and 4 threads, 90 s timeout) and **Redis** (`maxmemory 256mb`, `allkeys-lru`, no persistence needed).
-- **Frontend on Vercel:** calls `https://<api-domain>/api` directly. CORS is limited to the Vercel origin and `NUM_PROXIES=1`. A Vercel rewrite was rejected for two reasons: Caddy would only see Vercel's IPs, which breaks per-client rate limiting, and Vercel's proxy timeout is below the slowest route lookups (about 20 s). See `backend/deploy/DEPLOY.md`.
+- **VPS (shared with other apps):** `docker compose -f docker-compose.prod.yml up -d` runs the **backend** (gunicorn gthread with 2 workers and 4 threads, 90 s timeout), published only on `127.0.0.1:8010`, and **Redis** (`maxmemory 256mb`, `allkeys-lru`, no persistence needed). The server's existing **nginx** proxies the API domain to it, and certbot provides HTTPS.
+- **Frontend on Vercel:** calls `https://<api-domain>/api` directly. CORS is limited to the Vercel origin and `NUM_PROXIES=1`. A Vercel rewrite was rejected for two reasons: nginx would only see Vercel's IPs, which breaks per-client rate limiting, and Vercel's proxy timeout is below the slowest route lookups (about 20 s). See `backend/deploy/DEPLOY.md`.
 - **CI:** GitHub Actions runs ruff, pytest and `manage.py check --deploy`.
 
 ## 9. Assumptions to document in the README

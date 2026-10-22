@@ -117,7 +117,7 @@ jobs:
           # shellcheck disable=SC2029  # DEPLOY_PATH is meant to expand on the runner
           ssh deploy-target "mkdir -p '$DEPLOY_PATH/deploy'"
           scp docker-compose.prod.yml .env.example "deploy-target:$DEPLOY_PATH/"
-          scp deploy/Caddyfile deploy/remote-deploy.sh "deploy-target:$DEPLOY_PATH/deploy/"
+          scp deploy/remote-deploy.sh "deploy-target:$DEPLOY_PATH/deploy/"
 
       - name: Pull & restart (rolls back on failure)
         run: |
